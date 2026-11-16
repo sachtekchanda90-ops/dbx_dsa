@@ -1,0 +1,6 @@
+# Local test dependencies for this packet (installed by `make setup`).
+# Python 3.11+. The Spark-backed tests also need a JDK 17 or 21 (on PATH or via JAVA_HOME).
+pandas==3.0.3
+pyarrow==25.0.0
+pyspark==3.5.9
+pytest==9.1.1

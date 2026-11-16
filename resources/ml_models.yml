@@ -1,0 +1,51 @@
+# MLflow experiments for ML training jobs.
+#
+# Experiments are workspace objects (NOT Unity Catalog securables), so their name
+# is a workspace path. They are named directly under the user's home directory:
+# the parent (/Workspace/Users/<user>) always exists, so the experiments/create
+# API cannot 404. A previous nested "dsa_interview_packet/<name>" layout required
+# an intermediate folder that the bundle never created, so a first deploy to any
+# fresh workspace failed with "Parent directory does not exist" (404 NOT_FOUND).
+#
+# The training/eval jobs receive each experiment's *resolved* name via a job
+# parameter (see resources/jobs.yml, ``${resources.experiments.*.name}``) and the
+# scripts pass it to mlflow.set_experiment(). That guarantees runs land in these
+# tagged, bundle-managed experiments -- including in ``mode: development`` where the
+# name is prefixed with ``[dev <user>]`` -- rather than in a separate look-alike
+# experiment created from a hand-built string. All three experiments below are
+# declared (so all three are tagged and managed); tests/test_ml_experiments_config.py
+# enforces the flat-path invariant and that the scripts wire the injected name.
+#
+# Trained models (unlike experiments) are registered in the Unity Catalog model
+# registry at runtime as <catalog>.<schema>.<model> by the training scripts.
+resources:
+  experiments:
+    demand_forecast_experiment:
+      name: /Workspace/Users/${workspace.current_user.userName}/dsa_interview_packet_demand_forecast
+      tags:
+        - key: purpose
+          value: dsa_interview_packet
+        - key: model_type
+          value: demand_forecasting
+        - key: environment
+          value: ${bundle.target}
+
+    supplier_scoring_experiment:
+      name: /Workspace/Users/${workspace.current_user.userName}/dsa_interview_packet_supplier_scoring
+      tags:
+        - key: purpose
+          value: dsa_interview_packet
+        - key: model_type
+          value: supplier_scoring
+        - key: environment
+          value: ${bundle.target}
+
+    model_evaluation_experiment:
+      name: /Workspace/Users/${workspace.current_user.userName}/dsa_interview_packet_model_evaluation
+      tags:
+        - key: purpose
+          value: dsa_interview_packet
+        - key: model_type
+          value: model_evaluation
+        - key: environment
+          value: ${bundle.target}

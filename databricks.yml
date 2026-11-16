@@ -1,0 +1,102 @@
+# Databricks Asset Bundle: DSA Interview Packet -- Supply Chain Analytics
+#
+# Three implementations of 22 analytical queries:
+#   1. Lakehouse SQL -- standalone SQL files (queries/lakehouse/*.sql)
+#   2. Lakeflow -- Spark Declarative Pipeline via Lakeflow (pipelines/supply_chain_queries.py)
+#   3. Legacy   -- pandas functions for migration exercises (legacy/supply_chain_queries.py)
+#
+# Deploy:  databricks bundle deploy -t dev
+#
+# Default workspace init (validate → deploy → jobs):
+#   seed_source_tables → simulate_system_tables → ml_train_eval_pipeline
+# Optional: train_demand_forecast, train_supplier_scoring, evaluate_models separately.
+# Lakehouse pipeline (candidate implementation): supply_chain_pipeline when added.
+#
+# Default catalog is the workspace Unity Catalog catalog (Free Edition is UC-only, serverless-only).
+
+bundle:
+  name: dsa_interview_packet
+  uuid: a8c3e901-4b2f-5d6e-8c0a-1f2e3d4c5b6a
+  databricks_cli_version: ">= 0.260.0"
+
+include:
+  - resources/*.yml
+
+# __pycache__/, *.pyc, .venv/, and other local state are kept out of sync by .gitignore.
+sync:
+  exclude:
+    - "**/tests/**"
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for supply chain tables. Defaults to the workspace catalog (present on Free Edition).
+    default: workspace
+  schema:
+    description: Schema for supply chain source and result tables.
+    default: dsa_interview_supply_chain
+  mlflow_volume_catalog:
+    description: >-
+      UC catalog for the MLflow Spark ML scratch volume (serverless requires a /Volumes/... path).
+      Defaults to the same as ``catalog``; override only to place the scratch volume in a
+      different UC catalog.
+    default: ${var.catalog}
+  mlflow_volume_schema:
+    description: >-
+      UC schema for the MLflow scratch volume. Defaults to the same as ``schema``; override
+      only to place the scratch volume in a different UC schema.
+    default: ${var.schema}
+  mlflow_volume_name:
+    description: Managed volume name for MLflow dfs_tmpdir (CREATE VOLUME IF NOT EXISTS).
+    default: mlflow_scratch
+  ml_lineitem_sample_fraction:
+    description: >-
+      Fraction of ``lineitem`` rows for ML train/eval jobs (0-1]. Lower completes faster;
+      1.0 uses full seeded data.
+    default: 0.008
+  seed_orders_sample_fraction:
+    description: >-
+      Fraction of TPC-H ``orders`` (and FK-consistent ``lineitem`` / dimensions) to seed.
+      ``1.0`` copies full ``samples.tpch`` tables (slow). Values in (0, 1) keep referential
+      integrity via subsetting; default targets sub-6-minute validate→evaluate E2E.
+    default: 0.003
+  simulation_days:
+    description: >-
+      Days of synthetic billing, query history, and audit data in ``simulate_system_tables``.
+      Lower values reduce job time; the cost-analysis story is unchanged.
+    default: 1
+  seed_skip_if_populated:
+    description: >-
+      When ``true``, ``seed_source_tables`` exits without writing if lineitem already has rows
+      (see ``seed_min_lineitem_rows``). Pair with bundle state / ``seed_require_version``.
+    default: "false"
+  seed_min_lineitem_rows:
+    description: Minimum lineitem row count to treat seed data as present (integer string).
+    default: "100"
+  seed_data_version:
+    description: Optional version string stored after seed; empty uses an auto fingerprint.
+    default: ""
+  seed_require_version:
+    description: With skip-if-populated, skip only when this matches stored bundle state.
+    default: ""
+  simulate_skip_if_populated:
+    description: >-
+      When ``true``, ``simulate_system_tables`` exits if sim tables already have rows.
+    default: "false"
+  simulate_data_version:
+    description: Optional version stored after simulate; empty uses an auto fingerprint.
+    default: ""
+  simulate_require_version:
+    description: With skip-if-populated, skip only when this matches stored bundle state.
+    default: ""
+
+targets:
+  dev:
+    mode: development
+    default: true
+  dev_fast:
+    mode: development
+    default: false
+    variables:
+      seed_orders_sample_fraction: 0.001
+      simulation_days: 1
+      ml_lineitem_sample_fraction: 0.004

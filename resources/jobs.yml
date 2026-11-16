@@ -1,0 +1,316 @@
+# Jobs: seed → simulate → ml_train_eval_pipeline is the default init path (sub-6 min E2E).
+# Individual train_* / evaluate_models jobs remain for debugging one ML step.
+# Serverless compute: job environments with environment_version 5 (latest serverless
+# environment). Databricks Free Edition is serverless-only, so all jobs use serverless.
+resources:
+  jobs:
+    seed_source_tables:
+      name: seed_source_tables
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: orders_sample_fraction
+          default: ${var.seed_orders_sample_fraction}
+        - name: seed_skip_if_populated
+          default: ${var.seed_skip_if_populated}
+        - name: seed_min_lineitem_rows
+          default: ${var.seed_min_lineitem_rows}
+        - name: seed_data_version
+          default: ${var.seed_data_version}
+        - name: seed_require_version
+          default: ${var.seed_require_version}
+      tasks:
+        - task_key: seed
+          description: Copy samples.tpch tables into the target schema.
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/seed_source_tables.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--orders-sample-fraction"
+              - "{{job.parameters.orders_sample_fraction}}"
+              - "--skip-if-populated"
+              - "{{job.parameters.seed_skip_if_populated}}"
+              - "--min-lineitem-rows"
+              - "{{job.parameters.seed_min_lineitem_rows}}"
+              - "--data-version"
+              - "{{job.parameters.seed_data_version}}"
+              - "--require-version"
+              - "{{job.parameters.seed_require_version}}"
+          environment_key: default
+      environments: &dsa_serverless_env
+        - environment_key: default
+          spec:
+            environment_version: "5"
+
+    simulate_system_tables:
+      name: simulate_system_tables
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: simulation_days
+          default: ${var.simulation_days}
+        - name: simulate_skip_if_populated
+          default: ${var.simulate_skip_if_populated}
+        - name: simulate_data_version
+          default: ${var.simulate_data_version}
+        - name: simulate_require_version
+          default: ${var.simulate_require_version}
+      tasks:
+        - task_key: simulate
+          description: >-
+            Generate simulated system table data (billing, clusters, job runs)
+            that demonstrates the cost difference between legacy pandas,
+            Lakehouse SQL, and Lakeflow implementations.
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/simulate_system_tables.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--simulation-days"
+              - "{{job.parameters.simulation_days}}"
+              - "--skip-if-populated"
+              - "{{job.parameters.simulate_skip_if_populated}}"
+              - "--data-version"
+              - "{{job.parameters.simulate_data_version}}"
+              - "--require-version"
+              - "{{job.parameters.simulate_require_version}}"
+          environment_key: default
+      environments: *dsa_serverless_env
+
+    ml_train_eval_pipeline:
+      name: ml_train_eval_pipeline
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: mlflow_volume_catalog
+          default: ${var.mlflow_volume_catalog}
+        - name: mlflow_volume_schema
+          default: ${var.mlflow_volume_schema}
+        - name: mlflow_volume_name
+          default: ${var.mlflow_volume_name}
+        - name: lineitem_sample_fraction
+          default: ${var.ml_lineitem_sample_fraction}
+        # Resolved (dev-prefixed) names of the three bundle-managed experiments.
+        - name: demand_experiment_name
+          default: ${resources.experiments.demand_forecast_experiment.name}
+        - name: scoring_experiment_name
+          default: ${resources.experiments.supplier_scoring_experiment.name}
+        - name: evaluation_experiment_name
+          default: ${resources.experiments.model_evaluation_experiment.name}
+      tasks:
+        - task_key: train_and_evaluate
+          description: >-
+            Default ML path: train demand forecast, train supplier scoring, and evaluate in
+            one Spark session (use train_* / evaluate_models jobs to debug a single step).
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/run_ml_pipeline.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--mlflow-volume-catalog"
+              - "{{job.parameters.mlflow_volume_catalog}}"
+              - "--mlflow-volume-schema"
+              - "{{job.parameters.mlflow_volume_schema}}"
+              - "--mlflow-volume-name"
+              - "{{job.parameters.mlflow_volume_name}}"
+              - "--lineitem-sample-fraction"
+              - "{{job.parameters.lineitem_sample_fraction}}"
+              - "--demand-experiment-name"
+              - "{{job.parameters.demand_experiment_name}}"
+              - "--scoring-experiment-name"
+              - "{{job.parameters.scoring_experiment_name}}"
+              - "--evaluation-experiment-name"
+              - "{{job.parameters.evaluation_experiment_name}}"
+          environment_key: default
+      environments: *dsa_serverless_env
+
+    train_demand_forecast:
+      name: train_demand_forecast
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: mlflow_volume_catalog
+          default: ${var.mlflow_volume_catalog}
+        - name: mlflow_volume_schema
+          default: ${var.mlflow_volume_schema}
+        - name: mlflow_volume_name
+          default: ${var.mlflow_volume_name}
+        - name: lineitem_sample_fraction
+          default: ${var.ml_lineitem_sample_fraction}
+        # Resolved (dev-prefixed) name of the bundle-managed experiment, so runs
+        # land in the tagged experiment rather than a hand-built look-alike.
+        - name: experiment_name
+          default: ${resources.experiments.demand_forecast_experiment.name}
+      tasks:
+        - task_key: train
+          description: >-
+            Train a GBTRegressor demand forecasting model to predict
+            order line quantity (l_quantity) from supply chain features.
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/train_demand_forecast.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--mlflow-volume-catalog"
+              - "{{job.parameters.mlflow_volume_catalog}}"
+              - "--mlflow-volume-schema"
+              - "{{job.parameters.mlflow_volume_schema}}"
+              - "--mlflow-volume-name"
+              - "{{job.parameters.mlflow_volume_name}}"
+              - "--lineitem-sample-fraction"
+              - "{{job.parameters.lineitem_sample_fraction}}"
+              - "--experiment-name"
+              - "{{job.parameters.experiment_name}}"
+          environment_key: default
+      environments: *dsa_serverless_env
+
+    train_supplier_scoring:
+      name: train_supplier_scoring
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: mlflow_volume_catalog
+          default: ${var.mlflow_volume_catalog}
+        - name: mlflow_volume_schema
+          default: ${var.mlflow_volume_schema}
+        - name: mlflow_volume_name
+          default: ${var.mlflow_volume_name}
+        - name: lineitem_sample_fraction
+          default: ${var.ml_lineitem_sample_fraction}
+        # Resolved (dev-prefixed) name of the bundle-managed experiment.
+        - name: experiment_name
+          default: ${resources.experiments.supplier_scoring_experiment.name}
+      tasks:
+        - task_key: train
+          description: >-
+            Train a RandomForestClassifier to predict whether a lineitem
+            will be delivered late based on supplier reliability features.
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/train_supplier_scoring.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--mlflow-volume-catalog"
+              - "{{job.parameters.mlflow_volume_catalog}}"
+              - "--mlflow-volume-schema"
+              - "{{job.parameters.mlflow_volume_schema}}"
+              - "--mlflow-volume-name"
+              - "{{job.parameters.mlflow_volume_name}}"
+              - "--lineitem-sample-fraction"
+              - "{{job.parameters.lineitem_sample_fraction}}"
+              - "--experiment-name"
+              - "{{job.parameters.experiment_name}}"
+          environment_key: default
+      environments: *dsa_serverless_env
+
+    evaluate_models:
+      name: evaluate_models
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: mlflow_volume_catalog
+          default: ${var.mlflow_volume_catalog}
+        - name: mlflow_volume_schema
+          default: ${var.mlflow_volume_schema}
+        - name: mlflow_volume_name
+          default: ${var.mlflow_volume_name}
+        - name: lineitem_sample_fraction
+          default: ${var.ml_lineitem_sample_fraction}
+        # Resolved (dev-prefixed) names of the bundle-managed experiments: the two
+        # trained models are read from theirs, evaluation metrics written to its own.
+        - name: demand_experiment_name
+          default: ${resources.experiments.demand_forecast_experiment.name}
+        - name: scoring_experiment_name
+          default: ${resources.experiments.supplier_scoring_experiment.name}
+        - name: evaluation_experiment_name
+          default: ${resources.experiments.model_evaluation_experiment.name}
+      tasks:
+        - task_key: evaluate
+          description: >-
+            Run inference on recent data (1997-1998 orders) using the trained
+            demand forecast and supplier scoring models, and log evaluation
+            metrics to MLflow.
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/evaluate_models.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--mlflow-volume-catalog"
+              - "{{job.parameters.mlflow_volume_catalog}}"
+              - "--mlflow-volume-schema"
+              - "{{job.parameters.mlflow_volume_schema}}"
+              - "--mlflow-volume-name"
+              - "{{job.parameters.mlflow_volume_name}}"
+              - "--lineitem-sample-fraction"
+              - "{{job.parameters.lineitem_sample_fraction}}"
+              - "--demand-experiment-name"
+              - "{{job.parameters.demand_experiment_name}}"
+              - "--scoring-experiment-name"
+              - "{{job.parameters.scoring_experiment_name}}"
+              - "--evaluation-experiment-name"
+              - "{{job.parameters.evaluation_experiment_name}}"
+          environment_key: default
+      environments: *dsa_serverless_env
+
+    run_integration_tests:
+      name: run_integration_tests
+      tags:
+        purpose: dsa_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+      tasks:
+        - task_key: integration_tests
+          description: >-
+            Run all 22 queries via Lakehouse SQL, Lakeflow, and pandas, then validate
+            cross-implementation parity and independent property checks.
+          spark_python_task:
+            python_file: ../src/dsa_interview_packet/scripts/run_integration_tests.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+              - "--queries-path"
+              - "${workspace.file_path}/src/dsa_interview_packet/queries/lakehouse"
+          environment_key: default
+      environments: *dsa_serverless_env
